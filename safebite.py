@@ -80,3 +80,25 @@ def clean_ingredients(text):
 
     potential_ingredients = re.split(r'[;,]\s*(?![^()]*\))|\.\s+(?![^()]*\))|\s+and\s+(?![^()]*\))', ingredient_text)
 
+
+    cleaned = []
+    for ing in potential_ingredients:
+        cleaned_ing = re.sub(r"^[^\w(]+|[^\w)]+$", "", ing.strip()).strip() # Allow starting '(' and ending ')'
+        cleaned_ing = cleaned_ing.replace(' :', '') # Remove stray colons
+
+        if cleaned_ing and len(cleaned_ing) > 1 and not cleaned_ing.isdigit():
+            corrected_ing = cleaned_ing
+            if sym_spell:
+                suggestions = sym_spell.lookup(cleaned_ing, Verbosity.CLOSEST, max_edit_distance=SYM_SPELL_EDIT_DISTANCE, include_unknown=True)
+                if suggestions and suggestions[0].distance < SYM_SPELL_EDIT_DISTANCE + 1: # Only correct if close enough
+                    best_suggestion = suggestions[0].term
+                    # Avoid correcting ingredient names containing numbers like 'red 40' into words
+                    if not (any(char.isdigit() for char in cleaned_ing) and not any(char.isdigit() for char in best_suggestion)):
+                        if best_suggestion != cleaned_ing:
+                            logging.info(f"SymSpell corrected '{cleaned_ing}' to '{best_suggestion}' (distance {suggestions[0].distance})")
+                        corrected_ing = best_suggestion
+                    else:
+                        logging.info(f"SymSpell skipped correction for '{cleaned_ing}' due to number mismatch.")
+
+            if corrected_ing and corrected_ing not in cleaned: # Check non-empty after potential correction
+                cleaned.append(corrected_ing)
