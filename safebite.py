@@ -1,3 +1,7 @@
+!pip install -q torch transformers accelerate bitsandbytes symspellpy pytesseract pillow
+!sudo apt install -q tesseract-ocr
+!wget https://raw.githubusercontent.com/mammothb/symspellpy/master/symspellpy/frequency_dictionary_en_82_765.txt -O frequency_dict.txt
+
 import re
 import json
 import torch
@@ -9,7 +13,11 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 
 # --- Configuration ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-IMAGE_PATH = "/content/Maggie.jpg"
+IMAGE_PATH = "/content/Maggie.jpg" # Replace with your image path
+
+
+MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.3"
+
 
 MAX_OCR_CHARS = 3000
 MAX_INGREDIENTS = 100
@@ -61,12 +69,12 @@ def clean_ingredients(text):
                  ingredient_text = text[start_index:]
                  break # Use the first valid marker found
         except ValueError:
-            continue 
+            continue
 
-        if start_index == -1:
-            logging.warning("Could not find a clear ingredient start marker. Attempting cleanup on full text.")
-        
-        end_markers = ["nutrition facts", "serving size", "% daily value", "manufactured by", "distributed by", "produced by"]
+    if start_index == -1:
+        logging.warning("Could not find a clear ingredient start marker. Attempting cleanup on full text.")
+
+    end_markers = ["nutrition facts", "serving size", "% daily value", "manufactured by", "distributed by", "produced by"]
     for marker in end_markers:
         marker_index = ingredient_text.find(marker)
         if marker_index != -1:
@@ -79,7 +87,6 @@ def clean_ingredients(text):
     ingredient_text = re.sub(r'contains \d+% or less of\s*[:]*\s*', '', ingredient_text, flags=re.IGNORECASE)
 
     potential_ingredients = re.split(r'[;,]\s*(?![^()]*\))|\.\s+(?![^()]*\))|\s+and\s+(?![^()]*\))', ingredient_text)
-
 
     cleaned = []
     for ing in potential_ingredients:
@@ -394,5 +401,3 @@ def analyze_product(image_path):
 # --- Run Analysis ---
 if __name__ == "__main__":
     analyze_product(IMAGE_PATH)
-
-    \\
