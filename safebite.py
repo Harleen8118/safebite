@@ -66,4 +66,16 @@ def clean_ingredients(text):
         if start_index == -1:
             logging.warning("Could not find a clear ingredient start marker. Attempting cleanup on full text.")
         
-        
+        end_markers = ["nutrition facts", "serving size", "% daily value", "manufactured by", "distributed by", "produced by"]
+    for marker in end_markers:
+        marker_index = ingredient_text.find(marker)
+        if marker_index != -1:
+            logging.info(f"Removing text after '{marker}'")
+            ingredient_text = ingredient_text[:marker_index].strip()
+
+    # Improved splitting: handle commas/semicolons, periods followed by space, 'and', but respect parentheses
+    # Remove common clutter like 'less than 2% of:' before splitting
+    ingredient_text = re.sub(r'less than \d+% of\s*[:]*\s*', '', ingredient_text, flags=re.IGNORECASE)
+    ingredient_text = re.sub(r'contains \d+% or less of\s*[:]*\s*', '', ingredient_text, flags=re.IGNORECASE)
+
+    potential_ingredients = re.split(r'[;,]\s*(?![^()]*\))|\.\s+(?![^()]*\))|\s+and\s+(?![^()]*\))', ingredient_text)
