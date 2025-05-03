@@ -156,3 +156,241 @@ def load_model():
         tokenizer = None
         pipe = None
         return False
+
+def analyze_ingredients_llm(ingredients):
+    global pipe
+    if not pipe:
+        logging.error("LLM Pipeline not available.")
+        return {"error": "Model not loaded"}
+
+    if not ingredients:
+        logging.warning("No ingredients provided for analysis.")
+        return {"analysis": []}
+
+    ingredient_list_str = ', '.join(ingredients)
+    logging.info(f"Analyzing ingredients: {ingredient_list_str}")
+
+    # --- >>>> PROMPT REVISION <<<< ---
+    messages = [
+        {
+            "role": "system",
+            "content": """You are a highly specialized and meticulous food safety evaluation engine. Your SOLE function is to identify ingredients from a given list that pose **SUBSTANTIAL and WIDELY RECOGNIZED health risks** based on strong scientific consensus (e.g., reports from WHO, FDA, EFSA) or significant regulatory actions (e.g., bans, strict limits) in major regions.
+
+**Your PRIMARY directive is accuracy and avoiding false positives.** Do NOT flag ingredients based on minor controversies, niche dietary theories, common allergies (unless the ingredient itself is inherently risky beyond being an allergen), or general 'unhealthiness' like sugar or salt in typical contexts.
+
+**Apply a VERY HIGH THRESHOLD for flagging an ingredient.**
+
+**Output Requirements:**
+1.  Your response MUST be **ONLY** a valid JSON object. No introductory text, no explanations, no apologies, no closing remarks. Start with `{` and end with `}`.
+2.  The JSON object MUST contain a single key: `"analysis"`.
+3.  The value of `"analysis"` MUST be a list.
+4.  **CRITICAL RULE:** If **NO** ingredients in the provided list meet the **HIGH THRESHOLD** for substantial and widely recognized risk, this list MUST be **EMPTY**. Example: `{"analysis": []}`. This is the expected output for safe or common ingredient lists.
+5.  If and ONLY if one or more ingredients meet the high threshold, add an object for EACH such ingredient to the `"analysis"` list.
+6.  Each ingredient object MUST contain EXACTLY these keys:
+    *   `"ingredient"`: String. The name of the problematic ingredient. Include E-number if common (e.g., "Aspartame (E951)").
+    *   `"safety_index"`: Integer (1-3). Represents the confidence and severity of the risk: 1 = High Confidence/Severe Risk (e.g., banned substance, strong warnings), 2 = Moderate Confidence/Risk (e.g., significant controversy with strong evidence, strict limits), 3 = Lower Confidence/Specific Risk (e.g., risky only for specific vulnerable groups based on strong evidence). **DO NOT use 4 or 5.**
+    *   `"unsafe_for"`: Object with keys:
+        *   `"age_groups"`: List of strings (e.g., ["children", "infants"]). Empty `[]` if not specific.
+        *   `"diseases"`: List of strings (e.g., ["phenylketonuria"]). Empty `[]` if not specific.
+        *   `"allergies"`: List of strings (e.g., ["sulfite sensitivity"]). **ONLY list if the risk goes BEYOND a typical allergic reaction.** Empty `[]` otherwise.
+    *   `"severity"`: String: "critical" (for index 1), "moderate" (for index 2), or "low" (for index 3, representing risk mainly to specific groups).
+
+**Examples of what NOT to flag (return `{"analysis": []}`):**
+*   Lists containing only: Sugar, Salt, Flour, Water, Vegetable Oil, Citric Acid, Ascorbic Acid, Natural Flavors, Spices, Vinegar, Baking Soda, Yeast, Lecithin (soy/sunflower), Milk, Eggs, Wheat, etc.
+*   Common allergens like Soy, Nuts, Dairy, Gluten when listed normally.
+*   Standard vitamins and minerals.
+*   Commonly accepted preservatives like Sodium Benzoate, Potassium Sorbate unless there's a very specific, high-risk context.
+
+**Examples of what MIGHT be flagged (IF they meet the high threshold):**
+*   Partially Hydrogenated Oils (Trans Fats)
+*   Certain Artificial Colors with strong links to health issues (e.g., Red 3, Yellow 5 in some contexts)
+*   Aspartame (mainly for PKU risk, flag as lower severity unless specifically asked otherwise)
+*   Olestra
+*   Specific additives banned or heavily restricted in major regions.
+
+**FINAL INSTRUCTION:** Before outputting, double-check: Did any ingredient CLEARLY cross the high threshold for substantial, widely recognized risk? If not, your entire output MUST BE EXACTLY `{"analysis": []}`."""
+        },
+        {
+            "role": "user",
+            "content": f"Analyze the following ingredient list according to the strict rules and high threshold defined in the system prompt. Return ONLY the required JSON object.\n\nIngredients: {ingredient_list_str}"
+        }
+        # --- REMOVED Assistant Hint ---
+    ]
+
+    try:
+        # Used the tokenizer's chat template (Mistral Instruct uses [INST]...[/INST])
+        # Important: add_generation_prompt=True tells the template to add the prompt for the assistant's turn
+        prompt = pipe.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    except Exception as e:
+        logging.error(f"Could not apply chat template: {e}. Model might not generate correctly.")
+        # Fallback might be needed but is model-specific and less reliable
+        return {"error": f"Failed to create prompt using chat template: {e}"}
+
+
+    logging.info("Sending prompt to LLM.")
+    # print(f"DEBUG: Prompt sent to LLM:\n---\n{prompt}\n---") # Uncomment for debugging
+
+    try:
+        outputs = pipe(
+            prompt,
+            max_new_tokens=1024,
+            do_sample=True, # Keep sampling for potentially better/more natural analysis
+            temperature=0.5, # Slightly lower temp might help structure adherence
+            top_p=0.9,
+            eos_token_id=pipe.tokenizer.eos_token_id,
+            pad_token_id=pipe.tokenizer.pad_token_id if pipe.tokenizer.pad_token_id is not None else pipe.tokenizer.eos_token_id
+        )
+
+        # Extract only the generated part
+        # The pipeline output gives the full text including the prompt
+        # We need to find where the prompt ends and the response begins
+        response_text = outputs[0]['generated_text']
+        # Find the end of the prompt marker added by add_generation_prompt=True
+        # For Mistral, this is usually the end of the [/INST] block
+        prompt_end_marker = "[/INST]"
+        prompt_end_index = response_text.rfind(prompt_end_marker)
+        if prompt_end_index != -1:
+            generated_part = response_text[prompt_end_index + len(prompt_end_marker):].strip()
+        else:
+             # Fallback: If marker not found, maybe the model didn't follow template fully.
+             # Try removing the original prompt string (less reliable)
+             if response_text.startswith(prompt):
+                 generated_part = response_text[len(prompt):].strip()
+             else:
+                  # If prompt isn't at start (e.g., due to special tokens), this is harder
+                  logging.warning("Could not reliably isolate generated text from prompt. Using full output.")
+                  generated_part = response_text # Might contain prompt remnants
+
+
+        logging.info(f"LLM raw generated part received (length: {len(generated_part)}).")
+        # print(f"DEBUG: Raw LLM Generated Part:\n---\n{generated_part}\n---") # Uncomment for debugging
+
+        # --- Improved JSON Extraction ---
+        # Find the first '{' and the last '}' in the generated text
+        start_index = generated_part.find('{')
+        end_index = generated_part.rfind('}')
+
+        if start_index != -1 and end_index != -1 and end_index > start_index:
+            json_str = generated_part[start_index : end_index + 1]
+            logging.info(f"Attempting to parse JSON: {json_str[:200]}...") # Log preview
+            try:
+                analysis_data = json.loads(json_str)
+                if isinstance(analysis_data, dict) and "analysis" in analysis_data and isinstance(analysis_data["analysis"], list):
+                    logging.info("Successfully parsed JSON response from LLM.")
+                    return analysis_data
+                else:
+                     logging.error(f"Parsed JSON has unexpected structure: {analysis_data}")
+                     return {"error": "LLM response has invalid JSON structure", "raw_response": generated_part}
+
+            except json.JSONDecodeError as json_err:
+                logging.error(f"Failed to decode JSON from LLM response: {json_err}")
+                logging.error(f"Invalid JSON string was: {json_str}")
+                # Provide more context in the error
+                error_context_start = max(0, json_err.pos - 20)
+                error_context_end = min(len(json_str), json_err.pos + 20)
+                error_snippet = json_str[error_context_start:error_context_end]
+                logging.error(f"JSON error near position {json_err.pos}: ...{error_snippet}...")
+                return {"error": f"LLM response was not valid JSON ({json_err})", "raw_response": generated_part}
+        else:
+            logging.error("Could not find valid JSON object markers '{' and '}' in LLM generated text.")
+            return {"error": "No JSON object found in LLM response", "raw_response": generated_part}
+
+    except Exception as e:
+        logging.error(f"Error during LLM inference or processing: {e}", exc_info=True) # Log traceback
+        return {"error": f"LLM generation failed: {e}"}
+
+
+# --- Formatting Function (Keep as is) ---
+def format_results(analysis_data):
+    """Formats the JSON analysis into a user-friendly string."""
+    if "error" in analysis_data:
+        logging.error(f"Analysis failed: {analysis_data['error']}")
+        raw = analysis_data.get('raw_response', '')
+        # Limit raw response length in output
+        raw_preview = raw[:1000] + ('...' if len(raw) > 1000 else '')
+        return f"❌ Analysis Failed: {analysis_data['error']}\n" + (f"Raw Response Preview:\n{raw_preview}" if raw else "")
+
+    analysis_list = analysis_data.get('analysis', [])
+
+    if not analysis_list:
+        return "✅ No harmful or controversial ingredients detected based on the analysis."
+
+    report = f"🚨 {len(analysis_list)} Potentially Harmful/Controversial Ingredient(s) Found:\n"
+
+    for item in analysis_list:
+        try:
+            if not all(k in item for k in ["ingredient", "safety_index", "unsafe_for", "severity"]):
+                 report += f"\n⚠️ Skipping malformed item: {item}\n"
+                 continue
+            # Add fallback gets for inner keys too
+            unsafe_for = item.get('unsafe_for', {})
+            age_groups = unsafe_for.get('age_groups', [])
+            diseases = unsafe_for.get('diseases', [])
+            allergies = unsafe_for.get('allergies', [])
+
+            report += f"\n<-------------------->\n"
+            report += f"⚠️ **{item.get('ingredient', 'Unknown Ingredient')}**\n"
+            report += f"   - Safety Index: {item.get('safety_index', 'N/A')}/5 (1=High Concern, 5=Low Concern/Allergen)\n"
+            report += f"   - Severity Level: **{str(item.get('severity', 'N/A')).upper()}**\n"
+
+            warnings = []
+            if age_groups:
+                warnings.append(f"🚼 **Avoid for:** {', '.join(age_groups)}")
+            if diseases:
+                warnings.append(f"🏥 **Risky with:** {', '.join(diseases)}")
+            if allergies:
+                warnings.append(f"❗ **Potential Allergen:** {', '.join(allergies)}")
+
+            if warnings:
+                 report += "\n".join([f"   - {w}" for w in warnings]) + "\n"
+            else:
+                 report += "   - No specific avoidance groups listed (check general safety/severity).\n"
+        except Exception as e:
+             report += f"\n⚠️ Error formatting item: {item} - Error: {e}\n"
+
+    return report
+
+# --- Main Workflow (Keep as is) ---
+def analyze_product(image_path):
+    logging.info(f"--- Starting Analysis for {image_path} ---")
+    # Ensure model is loaded FIRST
+    if not load_model():
+        print("##############################################")
+        print("### FATAL: Failed to load language model ###")
+        print("##############################################")
+        print("Please check the logs above for errors (e.g., Hugging Face Hub connection, memory issues).")
+        return
+
+    raw_text = ocr_to_text(image_path)
+    if not raw_text:
+        print("\n--- OCR Failed ---")
+        print("Could not extract text from the image. Please check the image file and path.")
+        return
+    print("\n--- Raw OCR Text (Preview) ---")
+    print(raw_text[:500] + ('...' if len(raw_text) > 500 else ''))
+
+    ingredients = clean_ingredients(raw_text)
+    if not ingredients:
+        print("\n--- Ingredient Extraction Failed ---")
+        print("Could not detect or clean any ingredients from the OCR text.")
+        # Optionally print the raw text again here to help debug cleaning
+        # print("\n--- Raw OCR Text Used for Cleaning ---")
+        # print(raw_text)
+        return
+    print("\n--- Detected & Cleaned Ingredients ---")
+    print(', '.join(ingredients))
+
+    print("\n--- Requesting Analysis from LLM ---")
+    analysis_json = analyze_ingredients_llm(ingredients)
+
+    print("\n" + "=" * 50)
+    print("          Ingredient Analysis Report")
+    print("=" * 50)
+    print(format_results(analysis_json))
+    print("=" * 50)
+    logging.info(f"--- Analysis Complete for {image_path} ---")
+
+
+# --- Run Analysis ---
+if __name__ == "__main__":
+    analyze_product(IMAGE_PATH)
