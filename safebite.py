@@ -62,4 +62,5 @@ def clean_ingredients(text):
                  break # Use the first valid marker found
         except ValueError:
             continue 
-        
+        if start_index == -1:
+        logging.warning("Could not find a clear ingredient start marker. Attempting cleanup on full text.")
