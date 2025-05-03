@@ -11,3 +11,6 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 IMAGE_PATH = "/content/Maggie.jpg"
 
+MAX_OCR_CHARS = 3000
+MAX_INGREDIENTS = 100
+SYM_SPELL_EDIT_DISTANCE = 1
