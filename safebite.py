@@ -106,4 +106,53 @@ def clean_ingredients(text):
     logging.info(f"Found {len(cleaned)} potential ingredients.")
     return cleaned[:MAX_INGREDIENTS]
 
-    
+# --- LLM Analysis Function ---
+model = None
+tokenizer = None
+pipe = None
+
+def load_model():
+    global model, tokenizer, pipe
+    if pipe is not None and hasattr(pipe, 'model_name') and pipe.model_name == MODEL_NAME: # Check if correct model loaded
+        logging.info(f"Model {MODEL_NAME} already loaded.")
+        return True
+
+    logging.info(f"Loading model: {MODEL_NAME}")
+    try:
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16
+        )
+
+        tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+        if tokenizer.pad_token is None:
+             # Important: Set pad_token_id correctly based on model specifics if eos isn't right
+             logging.info("Tokenizer missing pad token, setting to EOS token.")
+             tokenizer.pad_token = tokenizer.eos_token
+             # Some models might need pad_token_id = 0 or another specific ID
+
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_NAME,
+            quantization_config=quantization_config,
+            device_map="auto",
+            torch_dtype=torch.bfloat16,
+            # attn_implementation="flash_attention_2" # Optional: If flash-attn is installed and supported, can speed up
+        )
+        pipe = pipeline(
+            "text-generation",
+            model=model,
+            tokenizer=tokenizer,
+            torch_dtype=torch.bfloat16,
+            device_map="auto"
+        )
+        # Store model name for checking later
+        pipe.model_name = MODEL_NAME
+        logging.info("Model loaded successfully.")
+        return True
+    except Exception as e:
+        logging.error(f"Error loading model {MODEL_NAME}: {e}", exc_info=True) # Log traceback
+        model = None
+        tokenizer = None
+        pipe = None
+        return False
