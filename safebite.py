@@ -41,4 +41,24 @@ def ocr_to_text(image_path):
         logging.error(f"Error during OCR processing: {e}")
         return None
 
-        
+# --- Ingredient Cleaning Function  ---
+def clean_ingredients(text):
+    """Cleans the OCR text to extract a list of ingredients."""
+    if not text:
+        return []
+    text = ' '.join(text.split()).lower()
+    ingredient_markers = ["ingredients:", "contains:", "ingredients :", "contains :"]
+    start_index = -1
+    ingredient_text = text # Default to full text if no marker found
+    for marker in ingredient_markers:
+        try:
+            idx = text.index(marker)
+            # Check if this marker is preceded by nutrition info (less likely to be the real start)
+            preceding_text = text[:idx]
+            if "nutrition facts" not in preceding_text and "serving size" not in preceding_text:
+                 start_index = idx + len(marker)
+                 logging.info(f"Found potential ingredient marker '{marker}'")
+                 ingredient_text = text[start_index:]
+                 break # Use the first valid marker found
+        except ValueError:
+            continue 
