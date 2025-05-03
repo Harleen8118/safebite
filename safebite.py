@@ -11,5 +11,3 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 IMAGE_PATH = "/content/Maggie.jpg"
 
-
-
