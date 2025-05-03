@@ -1,6 +1,3 @@
-!pip install -q torch transformers accelerate bitsandbytes symspellpy pytesseract pillow
-!sudo apt install -q tesseract-ocr
-!wget https://raw.githubusercontent.com/mammothb/symspellpy/master/symspellpy/frequency_dictionary_en_82_765.txt -O frequency_dict.txt
 
 import re
 import json
