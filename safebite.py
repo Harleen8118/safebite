@@ -24,3 +24,19 @@ except Exception as e:
     logging.error(f"Failed to load SymSpell dictionary: {e}")
     sym_spell = None
 
+# --- OCR Function (Keep as is) ---
+def ocr_to_text(image_path):
+    """Performs OCR on the image and returns the extracted text."""
+    try:
+        img = Image.open(image_path)
+        img_gray = img.convert('L')
+        # Try a different PSM mode if default fails often (e.g., 4 or 11)
+        text = pytesseract.image_to_string(img_gray, config='--psm 6').strip()
+        logging.info(f"OCR successful for {image_path}. Text length: {len(text)}")
+        return text[:MAX_OCR_CHARS]
+    except FileNotFoundError:
+        logging.error(f"Error: Image file not found at {image_path}")
+        return None
+    except Exception as e:
+        logging.error(f"Error during OCR processing: {e}")
+        return None
