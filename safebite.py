@@ -397,4 +397,3 @@ def analyze_product(image_path):
 # --- Run Analysis ---
 if __name__ == "__main__":
     analyze_product(IMAGE_PATH)
-
