@@ -7,4 +7,3 @@ from symspellpy import SymSpell, Verbosity
 import pytesseract
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, pipeline, TextStreamer
 
-
