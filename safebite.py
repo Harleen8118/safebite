@@ -102,3 +102,6 @@ def clean_ingredients(text):
 
             if corrected_ing and corrected_ing not in cleaned: # Check non-empty after potential correction
                 cleaned.append(corrected_ing)
+
+    logging.info(f"Found {len(cleaned)} potential ingredients.")
+    return cleaned[:MAX_INGREDIENTS]
